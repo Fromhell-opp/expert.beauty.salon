@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
-
+import 'package:flutter/services.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -15,17 +15,16 @@ class _MainScreenState extends State<MainScreen> {
   int _index = 0;
 
   Future<Map<String, dynamic>?> _loadMe() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return null;
-    final snap =
-    await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return null;
+
+    final snap = await FirebaseFirestore.instance.collection('users').doc(uid).get();
     return snap.data();
   }
 
   Future<void> _logout() async {
     await FirebaseAuth.instance.signOut();
-    if (!mounted) return;
-    context.go('/'); // вернёмся в AuthGate -> Welcome
+    if (mounted) context.go('/welcome');
   }
 
   @override
@@ -44,7 +43,6 @@ class _MainScreenState extends State<MainScreen> {
             name: name,
             salonId: salonId,
             onLogout: _logout,
-
           ),
           _ClientsTab(
             role: role,
@@ -115,7 +113,6 @@ class _DashboardTab extends StatelessWidget {
             tooltip: 'Выйти',
           ),
         ],
-
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -127,51 +124,105 @@ class _DashboardTab extends StatelessWidget {
                 : 'Записывайся на услуги в пару кликов',
           ),
           const SizedBox(height: 12),
+
+          // ✅ Мастера
           _ActionCard(
             icon: Icons.badge,
             title: 'Мастера',
             subtitle: 'Добавить и настроить мастеров',
-            onTap: () {
-              context.go('/masters');
-            },
+            onTap: () => context.go('/masters'),
           ),
+
           const SizedBox(height: 12),
 
+          // ✅ Уведомления + BADGE
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: salonId.isEmpty
+                ? const Stream.empty()
+                : FirebaseFirestore.instance
+                .collection('salons')
+                .doc(salonId)
+                .collection('notifications')
+                .where('read', isEqualTo: false)
+                .snapshots(),
+            builder: (context, snap) {
+              final unread = snap.data?.docs.length ?? 0;
+
+              return Stack(
+                children: [
+                  _ActionCard(
+                    icon: Icons.notifications,
+                    title: 'Уведомления',
+                    subtitle: 'Новые записи и отмены',
+                    onTap: () => context.go('/notifications'),
+                  ),
+                  if (unread > 0)
+                    Positioned(
+                      right: 18,
+                      top: 12,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          unread > 99 ? '99+' : unread.toString(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+
+          const SizedBox(height: 12),
 
           if (isOwner) ...[
             _ActionCard(
               icon: Icons.link,
               title: 'Ссылка для Instagram/2GIS',
               subtitle: 'Скопировать ссылку онлайн-записи',
-              onTap: () {
-                // позже сделаем генерацию slug и копирование
+              onTap: () async {
+                if (salonId.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Сначала создай салон (salonId пустой)')),
+                  );
+                  return;
+                }
+
+                final link = 'https://beauty-salon-app-15368.web.app/#/s/$salonId';
+
+                await Clipboard.setData(ClipboardData(text: link));
+
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Скоро: генерация ссылки')),
-                );
-              },
-            ),
-            const SizedBox(height: 12),
-            _ActionCard(
-              icon: Icons.design_services,
-              title: 'Услуги',
-              subtitle: 'Добавить/редактировать услуги',
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Скоро: управление услугами')),
+                  SnackBar(content: Text('Ссылка скопирована ✅\n$link')),
                 );
               },
 
             ),
+
             const SizedBox(height: 12),
+
+            _ActionCard(
+              icon: Icons.design_services,
+              title: 'Услуги',
+              subtitle: 'Добавить/редактировать услуги',
+              onTap: () => context.go('/services'),
+            ),
+
+            const SizedBox(height: 12),
+
             _ActionCard(
               icon: Icons.calendar_month,
               title: 'Записи',
               subtitle: 'Список записей клиентов',
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Скоро: список записей')),
-                );
-              },
+              onTap: () => context.go('/bookings'),
             ),
           ] else ...[
             _ActionCard(
@@ -210,7 +261,10 @@ class _ClientsTab extends StatelessWidget {
   final String role;
   final String salonId;
 
-  const _ClientsTab({required this.role, required this.salonId});
+  const _ClientsTab({
+    required this.role,
+    required this.salonId,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -244,7 +298,6 @@ class _OwnerClientsList extends StatelessWidget {
       );
     }
 
-    // ✅ Простой список клиентов: salons/{salonId}/clients
     final stream = FirebaseFirestore.instance
         .collection('salons')
         .doc(salonId)
@@ -300,7 +353,11 @@ class _OwnerClientsList extends StatelessWidget {
 class _SettingsTab extends StatelessWidget {
   final String role;
   final VoidCallback onLogout;
-  const _SettingsTab({required this.role, required this.onLogout});
+
+  const _SettingsTab({
+    required this.role,
+    required this.onLogout,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -336,7 +393,10 @@ class _HeaderCard extends StatelessWidget {
   final String title;
   final String subtitle;
 
-  const _HeaderCard({required this.title, required this.subtitle});
+  const _HeaderCard({
+    required this.title,
+    required this.subtitle,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -346,8 +406,10 @@ class _HeaderCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 6),
             Text(subtitle, style: const TextStyle(color: Colors.black54)),
           ],
@@ -388,7 +450,10 @@ class _EmptyState extends StatelessWidget {
   final String title;
   final String subtitle;
 
-  const _EmptyState({required this.title, required this.subtitle});
+  const _EmptyState({
+    required this.title,
+    required this.subtitle,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -400,9 +465,11 @@ class _EmptyState extends StatelessWidget {
           children: [
             const Icon(Icons.inbox_outlined, size: 56),
             const SizedBox(height: 12),
-            Text(title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 6),
             Text(subtitle, textAlign: TextAlign.center),
           ],

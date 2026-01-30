@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../presentation/screens/home_screen.dart';
-import '../presentation/screens/bookings_screen.dart';
+import '../presentation/admin/bookings_screen.dart';
 import '../presentation/screens/favorites_screen.dart';
 import '../presentation/screens/profile_screen.dart';
 

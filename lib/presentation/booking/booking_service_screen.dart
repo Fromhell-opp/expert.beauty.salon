@@ -3,8 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'booking_master_screen.dart';
 
 class BookingServiceScreen extends StatelessWidget {
-  final String salonId; // можешь пока не использовать, но оставим
-  final String slug;    // это salonSlug, например "expert312"
+  final String salonId; // ✅ теперь реально используется
+  final String slug;    // оставим для UI
   final String category;
 
   const BookingServiceScreen({
@@ -21,39 +21,38 @@ class BookingServiceScreen extends StatelessWidget {
       'pedicure' => 'Педикюр',
       'lashes' => 'Ресницы',
       'brows' => 'Брови',
+      'hair' => 'Волосы',
+      'massage' => 'Массаж',
       _ => 'Услуги',
     };
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text('$title • $slug'),
-      ),
-
-      // ✅ ВОТ ТУТ ВСТАВЛЕН .where('salonSlug', isEqualTo: slug)
-      body: StreamBuilder<QuerySnapshot>(
+      appBar: AppBar(title: Text('$title • $slug')),
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: FirebaseFirestore.instance
+            .collection('salons')
+            .doc(salonId)
             .collection('services')
-            .where('salonSlug', isEqualTo: slug)
-            .where('category', isEqualTo: category)
             .where('active', isEqualTo: true)
+            .where('category', isEqualTo: category)
+            .orderBy('createdAt', descending: true)
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-
           if (snapshot.hasError) {
-            return Center(
-              child: Text('Ошибка: ${snapshot.error}'),
-            );
+            return Center(child: Text('Ошибка: ${snapshot.error}'));
           }
 
           final docs = snapshot.data?.docs ?? [];
-
           if (docs.isEmpty) {
             return Center(
               child: Text(
-                'Услуги пока не добавлены\n\nПроверь в Firestore:\nservices -> salonSlug="$slug"\ncategory="$category"\nactive=true',
+                'Услуг нет для категории: $category\n\n'
+                    'Проверь в Firestore:\n'
+                    'salons/$salonId/services\n'
+                    'category="$category"\nactive=true',
                 textAlign: TextAlign.center,
               ),
             );
@@ -63,28 +62,29 @@ class BookingServiceScreen extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             itemCount: docs.length,
             separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              final data = docs[index].data() as Map<String, dynamic>;
+            itemBuilder: (context, i) {
+              final data = docs[i].data();
+              final name = (data['name'] ?? 'Услуга').toString();
 
-              final name = (data['name'] ?? '').toString();
-              final duration = (data['duration'] ?? 0);
-              final durationInt =
-              duration is int ? duration : int.tryParse(duration.toString()) ?? 0;
+              final durationMin = (data['durationMin'] is int)
+                  ? data['durationMin'] as int
+                  : int.tryParse('${data['durationMin'] ?? ''}') ?? 60;
 
               return Card(
                 child: ListTile(
                   title: Text(name),
-                  subtitle: Text('$durationInt мин'),
+                  subtitle: Text('$durationMin мин'),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 18),
                   onTap: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (_) => BookingMasterScreen(
+                          salonId: salonId,
                           slug: slug,
                           category: category,
                           serviceName: name,
-                          duration: durationInt,
+                          duration: durationMin,
                         ),
                       ),
                     );

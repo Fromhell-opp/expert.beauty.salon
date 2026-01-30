@@ -1,29 +1,47 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:go_router/go_router.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
-class BookingHomeScreen extends StatelessWidget {
+class BookingHomeScreen extends StatefulWidget {
   final String slug;
   const BookingHomeScreen({super.key, required this.slug});
 
-  Future<DocumentSnapshot<Map<String, dynamic>>?> _findSalon() async {
+  @override
+  State<BookingHomeScreen> createState() => _BookingHomeScreenState();
+}
+
+class _BookingHomeScreenState extends State<BookingHomeScreen> {
+  Future<void> _ensureAnon() async {
+    final auth = FirebaseAuth.instance;
+    if (auth.currentUser == null) {
+      await auth.signInAnonymously();
+    }
+  }
+
+  Future<Map<String, dynamic>?> _loadSalonBySlug() async {
+    await _ensureAnon();
+
     final db = FirebaseFirestore.instance;
 
-    // ✅ 1) пробуем как docId = slug (у тебя так и есть: salons/expert312)
-    final doc = await db.collection('salons').doc(slug).get();
-    if (doc.exists) return doc;
+    final slugDoc = await db.collection('slugs').doc(widget.slug).get();
+    if (!slugDoc.exists) return null;
 
-    // ✅ 2) fallback: если вдруг позже будешь хранить поле slug
-    final q = await db.collection('salons').where('slug', isEqualTo: slug).limit(1).get();
-    if (q.docs.isEmpty) return null;
+    final salonId = (slugDoc.data()?['salonId'] ?? '').toString();
+    if (salonId.isEmpty) return null;
 
-    return q.docs.first;
+    final salonDoc = await db.collection('salons').doc(salonId).get();
+    if (!salonDoc.exists) return null;
+
+    return {
+      'salonId': salonId,
+      ...?salonDoc.data(),
+    };
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>?>(
-      future: _findSalon(),
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: _loadSalonBySlug(),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -32,28 +50,25 @@ class BookingHomeScreen extends StatelessWidget {
           return Scaffold(body: Center(child: Text('Ошибка: ${snap.error}')));
         }
 
-        final salonDoc = snap.data;
-        if (salonDoc == null) {
+        final data = snap.data;
+        if (data == null) {
           return Scaffold(
-            appBar: AppBar(title: const Text('Запись')),
-            body: Center(
-              child: Text('Салон не найден\nslug=$slug', textAlign: TextAlign.center),
-            ),
+            appBar: AppBar(title: const Text('Онлайн-запись')),
+            body: Center(child: Text('Салон не найден\nslug=${widget.slug}', textAlign: TextAlign.center)),
           );
         }
 
-        final salonId = salonDoc.id;
-        final data = salonDoc.data() ?? {};
-        final salonName = (data['name'] as String?) ?? slug;
-        final city = (data['city'] as String?) ?? '';
+        final salonName = (data['name'] ?? widget.slug).toString();
+        final city = (data['city'] ?? '').toString();
+        final address = (data['address'] ?? '').toString();
 
         return Scaffold(
           appBar: AppBar(title: Text('Запись • $salonName')),
-          body: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
+          body: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
                 child: Card(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
@@ -61,24 +76,24 @@ class BookingHomeScreen extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Text(
-                          salonName,
-                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                          textAlign: TextAlign.center,
-                        ),
+                        Text(salonName, textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                         if (city.isNotEmpty) ...[
                           const SizedBox(height: 6),
                           Text(city, textAlign: TextAlign.center),
                         ],
+                        if (address.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(address, textAlign: TextAlign.center),
+                        ],
                         const SizedBox(height: 16),
-
                         ElevatedButton(
                           onPressed: () {
-                            // ✅ Переходим на экран категорий через роут
-                            // Тебе нужно добавить этот route (см ниже в пункте B)
-                            context.push('/s/$slug/categories');
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Дальше: категории/услуги/слоты')),
+                            );
                           },
-                          child: const Text('Выбрать категорию услуг'),
+                          child: const Text('Выбрать услугу'),
                         ),
                       ],
                     ),
